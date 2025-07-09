@@ -1,11 +1,9 @@
-use mongodb::{
-    options::ClientOptions,
-    Client, Database,
-};
+use anyhow::{Context, Result};
+use mongodb::{Client, Database, options::ClientOptions};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::{Result, Context};
+use tracing::info;
 
 use crate::system::config::{AppConfig, DatabaseConfig};
 
@@ -35,33 +33,39 @@ impl DatabaseService {
 
     pub async fn initialize(config: &AppConfig) -> Result<DatabaseManager> {
         let mut service = DatabaseService::new();
-        
-        println!("🗄️  Initializing database connections...");
-        
+
+        info!("🗄️  Initializing database connections...");
+
         for (index, db_config) in config.databases.iter().enumerate() {
             let connection_name = if index == 0 {
                 "default".to_string()
             } else {
                 format!("db{}", index)
             };
-            
+
             let connection_info = Self::create_connection(db_config, &connection_name).await?;
-            
-            println!("✅ Connected to database: {} ({})", connection_name, db_config.database);
-            
+
+            info!(
+                "✅ Connected to database: {} ({})",
+                connection_name, db_config.database
+            );
+
             if index == 0 {
                 service.default_connection = Some(connection_name.clone());
             }
-            
+
             service.connections.insert(connection_name, connection_info);
         }
-        
+
         if service.connections.is_empty() {
             return Err(anyhow::anyhow!("No database connections configured"));
         }
-        
-        println!("🚀 Database manager initialized with {} connections", service.connections.len());
-        
+
+        info!(
+            "🚀 Database manager initialized with {} connections",
+            service.connections.len()
+        );
+
         Ok(Arc::new(RwLock::new(service)))
     }
 
@@ -70,24 +74,32 @@ impl DatabaseService {
         connection_name: &str,
     ) -> Result<ConnectionInfo> {
         // Build connection string
-        let connection_string = if let (Some(username), Some(password)) = (&config.username, &config.password) {
-            format!(
-                "mongodb://{}:{}@{}:{}/{}",
-                username, password, config.host, config.port, config.database
-            )
-        } else {
-            format!("mongodb://{}:{}/{}", config.host, config.port, config.database)
-        };
+        let connection_string =
+            if let (Some(username), Some(password)) = (&config.username, &config.password) {
+                format!(
+                    "mongodb://{}:{}@{}:{}/{}",
+                    username, password, config.host, config.port, config.database
+                )
+            } else {
+                format!(
+                    "mongodb://{}:{}/{}",
+                    config.host, config.port, config.database
+                )
+            };
 
         // Parse connection string and set options
         let mut client_options = ClientOptions::parse(&connection_string)
             .await
-            .with_context(|| format!("Failed to parse connection string for {}", connection_name))?;
+            .with_context(|| {
+                format!("Failed to parse connection string for {}", connection_name)
+            })?;
 
         // Set connection pool options
         client_options.max_pool_size = Some(config.max_connections);
-        client_options.connect_timeout = Some(std::time::Duration::from_secs(config.connection_timeout));
-        client_options.server_selection_timeout = Some(std::time::Duration::from_secs(config.connection_timeout));
+        client_options.connect_timeout =
+            Some(std::time::Duration::from_secs(config.connection_timeout));
+        client_options.server_selection_timeout =
+            Some(std::time::Duration::from_secs(config.connection_timeout));
 
         // Create client
         let client = Client::with_options(client_options)
@@ -113,7 +125,9 @@ impl DatabaseService {
     pub async fn get_database(&self, name: Option<&str>) -> Result<DatabaseHandle> {
         let connection_name = match name {
             Some(name) => name.to_string(),
-            None => self.default_connection.as_ref()
+            None => self
+                .default_connection
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No default database connection"))?
                 .clone(),
         };
@@ -127,7 +141,9 @@ impl DatabaseService {
     pub async fn get_connection_info(&self, name: Option<&str>) -> Result<ConnectionInfo> {
         let connection_name = match name {
             Some(name) => name.to_string(),
-            None => self.default_connection.as_ref()
+            None => self
+                .default_connection
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("No default database connection"))?
                 .clone(),
         };
@@ -144,37 +160,35 @@ impl DatabaseService {
 
     pub async fn health_check(&self) -> Result<HashMap<String, bool>> {
         let mut results = HashMap::new();
-        
+
         for (name, conn) in &self.connections {
-            let is_healthy = conn.database
+            let is_healthy = conn
+                .database
                 .run_command(bson::doc! { "ping": 1 })
                 .await
                 .is_ok();
-            
+
             results.insert(name.clone(), is_healthy);
         }
-        
+
         Ok(results)
     }
 
     pub async fn close_connections(&mut self) -> Result<()> {
-        println!("🔒 Closing database connections...");
-        
+        info!("🔒 Closing database connections...");
+
         for (name, _) in self.connections.drain() {
-            println!("✅ Closed connection: {}", name);
+            info!("✅ Closed connection: {}", name);
         }
-        
+
         self.default_connection = None;
-        
+
         Ok(())
     }
 }
 
 // Helper functions for easy database access
-pub async fn get_database(
-    manager: &DatabaseManager,
-    name: Option<&str>,
-) -> Result<DatabaseHandle> {
+pub async fn get_database(manager: &DatabaseManager, name: Option<&str>) -> Result<DatabaseHandle> {
     let service = manager.read().await;
     service.get_database(name).await
 }
@@ -190,4 +204,4 @@ pub async fn get_connection_info(
 pub async fn health_check(manager: &DatabaseManager) -> Result<HashMap<String, bool>> {
     let service = manager.read().await;
     service.health_check().await
-} 
+}

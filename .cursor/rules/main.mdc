@@ -1,0 +1,122 @@
+---
+alwaysApply: true
+---
+
+# Rust API Development - Main Rules
+
+## Work Process (Agent Process)
+
+1. **Read**: Understand requirements based on rule file
+2. **Ask**: Clarify requirements with user
+3. **Approach**: Provide 1-3 solutions with trade-offs
+4. **Code**: Code in small parts, don't do everything at once
+5. **Test**: Test after each code part
+6. **Clean**: Close terminals, tests, servers, etc. from coding + testing process
+7. **Document**: Save knowledge to *.mdc file so I can use for future
+
+## Project Overview
+
+- **Tech stack**: Axum, Tokio, Tower (middleware)
+- **Architecture**: Hybrid Domain-Driven Design with System modules
+- **Features**: API versioning, multi-env config, i18n locale, API docs, multiple MongoDB
+- **Language**: Vietnamese communication (call user "Sếp", be called "em")
+
+## Project Structure
+
+```
+src/
+├── system/              # Core system modules
+│   ├── config/          # Environment configuration → @config_system.mdc
+│   ├── database/        # MongoDB connections → @database_system.mdc
+│   ├── locale/          # i18n support → @locale_system.mdc
+│   ├── versioning/      # API versioning → @versioning_system.mdc
+│   └── docs/            # Auto-generated docs
+├── domains/             # Business domains (DDD)
+│   ├── auth/            # Authentication → @auth_domain.mdc
+│   │   ├── handlers/    # Route handlers
+│   │   ├── services/    # Business logic
+│   │   └── dto/         # Data transfer objects
+├── middleware/          # Cross-cutting concerns
+├── shared/              # Layer architecture for reusable components
+│   ├── models/          # Shared data models
+│   ├── constants/       # Global constants
+│   ├── utils/           # Utility functions
+│   └── types/           # Common types & enums
+└── main.rs
+```
+
+## Naming Conventions & Code Standards
+
+### Rust Specific
+- Use `snake_case` for variables, functions, modules
+- Use `PascalCase` for structs, enums, traits
+- Use `SCREAMING_SNAKE_CASE` for constants
+- Meaningful names (e.g., `calculate_total_price` not `calc`)
+- Avoid abbreviations unless universally understood
+
+### Functions & Methods
+- **Single Responsibility Principle**: Each function should do one thing
+- Keep functions short (ideally < 50 lines)
+- Use `Result<T, E>` for error handling
+- Avoid side effects, prefer pure functions
+
+### Error Handling
+- Use `Result` and `?` operator for error propagation
+- Create meaningful error types with context
+- Use `anyhow` for application errors, `thiserror` for library errors
+- Never ignore errors with `unwrap()` in production code
+
+### Code Structure
+- Use consistent indentation (4 spaces for Rust)
+- Limit line length (100 characters)
+- Remove dead code and unused imports
+- Use `Arc<T>` for sharing data between async tasks
+
+## Specialized Rules References
+
+When working with specific domains, refer to these specialized rule files:
+
+- **@config_system.mdc**: Environment configuration, multi-env support
+- **@database_system.mdc**: MongoDB connections, health checks, multi-database
+- **@locale_system.mdc**: i18n system, locale detection, message loading
+- **@auth_domain.mdc**: Authentication, JWT, password handling, middleware
+- **@versioning_system.mdc**: API versioning middleware and strategies
+
+## Implementation Priority
+
+- [x] Config system with multi-environment support
+- [x] Database connections with health monitoring  
+- [x] Locale/i18n system with fallback chains
+- [x] API versioning middleware
+- [ ] Authentication domain (JWT, password, middleware)
+- [ ] API documentation generation
+- [ ] Rate limiting and security middleware
+
+## Development Guidelines
+
+### Async Code
+- Prefer `async/await` over callbacks
+- Use `tokio::spawn` for concurrent tasks
+- Handle timeouts with `tokio::time::timeout`
+- Use `Arc<Mutex<T>>` or `Arc<RwLock<T>>` for shared state
+
+### Security Practices
+- Validate all input using strong typing
+- Sanitize user input to prevent injection
+- Use secure password hashing (argon2, bcrypt)
+- Implement rate limiting and auth middleware
+- Never log sensitive data (passwords, tokens)
+
+### Testing Strategy
+- Unit tests for business logic
+- Integration tests for API endpoints
+- Use `tokio::test` for async tests
+- Mock external dependencies
+- Test error conditions and edge cases
+
+## References
+
+- [Axum Documentation](https://docs.rs/axum)
+- [Tokio Runtime](https://docs.rs/tokio)
+- [Tower Middleware](https://docs.rs/tower)
+- [MongoDB Rust Driver](https://docs.rs/mongodb)

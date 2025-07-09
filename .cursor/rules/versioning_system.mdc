@@ -1,0 +1,351 @@
+
+# API Versioning System Rules
+
+## Versioning Strategy
+
+### Supported Versioning Methods
+- **Header-based**: `API-Version: v1` or `Accept: application/vnd.api+json;version=1`
+- **Query parameter**: `?version=v1` or `?api_version=1`
+- **URL path**: `/api/v1/users` (traditional REST approach)
+- **Accept header**: `Accept: application/vnd.myapi.v1+json`
+
+### Version Detection Priority
+1. **Explicit URL path**: `/api/v1/...`, `/api/v2/...`
+2. **API-Version header**: Custom header for version specification
+3. **Query parameters**: `?version=v1` or `?api_version=1`
+4. **Accept header**: Content negotiation with version
+5. **Default fallback**: Latest stable version
+
+## Version Types and Structure
+
+### Version Enum
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ApiVersion {
+    V1,
+    V2,
+    V3,
+    Latest,  // Points to current stable version
+    Beta,    // Current beta version
+}
+
+impl ApiVersion {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ApiVersion::V1 => "v1",
+            ApiVersion::V2 => "v2", 
+            ApiVersion::V3 => "v3",
+            ApiVersion::Latest => "v3", // Current latest
+            ApiVersion::Beta => "v4-beta",
+        }
+    }
+    
+    pub fn from_str(s: &str) -> Result<Self, VersionError> {
+        match s.to_lowercase().as_str() {
+            "v1" | "1" => Ok(ApiVersion::V1),
+            "v2" | "2" => Ok(ApiVersion::V2),
+            "v3" | "3" => Ok(ApiVersion::V3),
+            "latest" | "current" => Ok(ApiVersion::Latest),
+            "beta" | "v4-beta" | "4-beta" => Ok(ApiVersion::Beta),
+            _ => Err(VersionError::UnsupportedVersion(s.to_string())),
+        }
+    }
+    
+    pub fn is_deprecated(&self) -> bool {
+        matches!(self, ApiVersion::V1)
+    }
+    
+    pub fn deprecation_date(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        match self {
+            ApiVersion::V1 => Some(chrono::Utc::now() + chrono::Duration::days(180)), // 6 months
+            _ => None,
+        }
+    }
+}
+```
+
+### Version Info Structure
+```rust
+#[derive(Debug, Clone)]
+pub struct VersionInfo {
+    pub version: ApiVersion,
+    pub source: VersionSource,
+    pub is_supported: bool,
+    pub is_deprecated: bool,
+    pub deprecation_notice: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum VersionSource {
+    Path,       // From URL path
+    Header,     // From API-Version header
+    Query,      // From query parameter
+    Accept,     // From Accept header
+    Default,    // Default fallback
+}
+```
+
+## Version Detection Implementation
+
+### Version Extractor
+```rust
+pub fn extract_version_from_request(
+    uri: &Uri,
+    headers: &HeaderMap,
+    query: &Query<VersionQuery>
+) -> VersionInfo {
+    // 1. Check URL path first
+    if let Some(version) = extract_version_from_path(uri.path()) {
+        return VersionInfo {
+            version,
+            source: VersionSource::Path,
+            is_supported: true,
+            is_deprecated: version.is_deprecated(),
+            deprecation_notice: get_deprecation_notice(&version),
+        };
+    }
+    
+    // 2. Check API-Version header
+    if let Some(version_header) = headers.get("api-version") {
+        if let Ok(version_str) = version_header.to_str() {
+            if let Ok(version) = ApiVersion::from_str(version_str) {
+                return VersionInfo {
+                    version,
+                    source: VersionSource::Header,
+                    is_supported: true,
+                    is_deprecated: version.is_deprecated(),
+                    deprecation_notice: get_deprecation_notice(&version),
+                };
+            }
+        }
+    }
+    
+    // 3. Check query parameters
+    if let Some(version_str) = query.version.as_ref().or(query.api_version.as_ref()) {
+        if let Ok(version) = ApiVersion::from_str(version_str) {
+            return VersionInfo {
+                version,
+                source: VersionSource::Query,
+                is_supported: true,
+                is_deprecated: version.is_deprecated(),
+                deprecation_notice: get_deprecation_notice(&version),
+            };
+        }
+    }
+    
+    // 4. Default to latest
+    VersionInfo {
+        version: ApiVersion::Latest,
+        source: VersionSource::Default,
+        is_supported: true,
+        is_deprecated: false,
+        deprecation_notice: None,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VersionQuery {
+    pub version: Option<String>,
+    pub api_version: Option<String>,
+}
+```
+
+## Version Middleware
+
+### Version Detection Middleware
+```rust
+pub async fn version_middleware<B>(
+    mut request: Request<B>,
+    next: Next<B>
+) -> Result<Response, StatusCode> {
+    let (parts, body) = request.into_parts();
+    
+    let query = Query::<VersionQuery>::try_from_uri(&parts.uri)
+        .unwrap_or_default();
+    
+    let version_info = extract_version_from_request(&parts.uri, &parts.headers, &query);
+    
+    if !version_info.is_supported {
+        return Err(StatusCode::NOT_ACCEPTABLE);
+    }
+    
+    request = Request::from_parts(parts, body);
+    request.extensions_mut().insert(version_info.clone());
+    
+    let mut response = next.run(request).await;
+    
+    // Add version headers to response
+    let headers = response.headers_mut();
+    headers.insert(
+        "API-Version",
+        HeaderValue::from_str(version_info.version.as_str()).unwrap()
+    );
+    
+    // Add deprecation warning if applicable
+    if let Some(_) = &version_info.deprecation_notice {
+        headers.insert("Deprecation", HeaderValue::from_str("true").unwrap());
+        headers.insert(
+            "Link",
+            HeaderValue::from_str(&format!(
+                "</api/{}/>; rel=\"successor-version\"",
+                ApiVersion::Latest.as_str()
+            )).unwrap()
+        );
+    }
+    
+    Ok(response)
+}
+```
+
+### Version-specific Routing
+```rust
+pub fn create_versioned_routes() -> Router<AppState> {
+    Router::new()
+        // V1 routes (deprecated)
+        .nest("/api/v1", v1_routes())
+        
+        // V2 routes (stable)
+        .nest("/api/v2", v2_routes())
+        
+        // V3 routes (latest)
+        .nest("/api/v3", v3_routes())
+        
+        // Default routes (points to latest)
+        .nest("/api", latest_routes())
+        
+        // Add version middleware to all routes
+        .layer(middleware::from_fn(version_middleware))
+}
+
+fn v1_routes() -> Router<AppState> {
+    Router::new()
+        .route("/users", get(v1::get_users))
+        .route("/users/:id", get(v1::get_user_by_id))
+        .layer(middleware::from_fn(deprecation_warning_middleware))
+}
+```
+
+## Version-specific Handlers
+
+### Handler Versioning Pattern
+```rust
+// V1 handlers - simple response format
+pub mod v1 {
+    #[derive(Serialize)]
+    pub struct V1User {
+        pub id: String,
+        pub email: String,
+        pub created_at: String, // Simple string format in v1
+    }
+    
+    pub async fn get_users(
+        State(state): State<AppState>
+    ) -> Result<Json<Vec<V1User>>, AppError> {
+        let users_collection = get_users_collection(&state.database).await?;
+        let users: Vec<User> = users_collection.find(doc! {}, None).await?.try_collect().await?;
+        
+        let v1_users: Vec<V1User> = users.into_iter().map(V1User::from).collect();
+        Ok(Json(v1_users))
+    }
+}
+
+// V2 handlers - enhanced response format
+pub mod v2 {
+    #[derive(Serialize)]
+    pub struct V2Response<T> {
+        pub data: T,
+        pub meta: ResponseMeta,
+    }
+    
+    #[derive(Serialize)]
+    pub struct ResponseMeta {
+        pub version: String,
+        pub count: usize,
+        pub deprecated: bool,
+    }
+    
+    pub async fn get_users(
+        Extension(version_info): Extension<VersionInfo>,
+        State(state): State<AppState>
+    ) -> Result<Json<V2Response<Vec<V2User>>>, AppError> {
+        let users_collection = get_users_collection(&state.database).await?;
+        let users: Vec<User> = users_collection.find(doc! {}, None).await?.try_collect().await?;
+        
+        let v2_users: Vec<V2User> = users.into_iter().map(V2User::from).collect();
+        
+        Ok(Json(V2Response {
+            data: v2_users,
+            meta: ResponseMeta {
+                version: version_info.version.as_str().to_string(),
+                count: users.len(),
+                deprecated: version_info.is_deprecated,
+            },
+        }))
+    }
+}
+```
+
+## Error Handling
+
+### Version-specific Errors
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum VersionError {
+    #[error("Unsupported API version: {0}")]
+    UnsupportedVersion(String),
+    
+    #[error("API version {version} is deprecated. Use {latest} instead.")]
+    DeprecatedVersion { version: String, latest: String },
+    
+    #[error("Invalid version format: {0}")]
+    InvalidFormat(String),
+}
+
+impl IntoResponse for VersionError {
+    fn into_response(self) -> Response {
+        let (status, error_message) = match self {
+            VersionError::UnsupportedVersion(_) => (StatusCode::NOT_ACCEPTABLE, self.to_string()),
+            VersionError::DeprecatedVersion { .. } => (StatusCode::GONE, self.to_string()),
+            VersionError::InvalidFormat(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+        };
+        
+        let body = Json(json!({
+            "error": {
+                "message": error_message,
+                "type": "VersionError",
+                "supported_versions": ["v1", "v2", "v3", "latest"]
+            }
+        }));
+        
+        (status, body).into_response()
+    }
+}
+```
+
+## Best Practices
+
+### Version Management
+- **Semantic versioning**: Use clear version numbers (v1, v2, v3)
+- **Backward compatibility**: Maintain older versions for transition period
+- **Deprecation policy**: Give 6+ months notice before removing versions
+- **Documentation**: Clear migration guides between versions
+
+### URL Design
+- **Consistent patterns**: Use `/api/v1/` prefix for all versioned endpoints
+- **Default behavior**: `/api/` should point to latest stable version
+- **No version mixing**: Don't allow different versions in same request
+
+### Response Format
+- **Version metadata**: Include version info in response headers
+- **Deprecation warnings**: Clear warnings in headers and response body
+- **Migration guidance**: Provide links to newer versions
+
+### Client Communication
+- **Header preferences**: Encourage clients to use API-Version header
+- **Sunset headers**: Use standard HTTP headers for deprecation
+- **Version discovery**: Provide endpoint to list supported versions
+
+### Development Workflow
+  - **Feature flags**: Use flags to enable/disable features per version
+  - **Testing**: Comprehensive tests for all supported versions  
+  - **Monitoring**: Track usage of deprecated versions

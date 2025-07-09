@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::warn;
 
 use super::{Locale, LocaleError, LocaleRegistry};
 
@@ -109,7 +110,7 @@ impl MessageLoader {
     // Load messages from JSON file
     async fn load_from_file(&self, locale: &Locale) -> Result<Messages, LocaleError> {
         let file_path = self.get_locale_file_path(locale);
-        
+
         if !file_path.exists() {
             return Err(LocaleError::FileError(format!(
                 "Locale file not found: {:?}",
@@ -117,18 +118,16 @@ impl MessageLoader {
             )));
         }
 
-        let content = tokio::fs::read_to_string(&file_path)
-            .await
-            .map_err(|e| LocaleError::FileError(format!(
-                "Failed to read locale file {:?}: {}",
-                file_path, e
-            )))?;
+        let content = tokio::fs::read_to_string(&file_path).await.map_err(|e| {
+            LocaleError::FileError(format!("Failed to read locale file {:?}: {}", file_path, e))
+        })?;
 
-        let messages: Messages = serde_json::from_str(&content)
-            .map_err(|e| LocaleError::FileError(format!(
+        let messages: Messages = serde_json::from_str(&content).map_err(|e| {
+            LocaleError::FileError(format!(
                 "Failed to parse locale file {:?}: {}",
                 file_path, e
-            )))?;
+            ))
+        })?;
 
         Ok(messages)
     }
@@ -141,7 +140,7 @@ impl MessageLoader {
     pub async fn get_message(&self, key: &str, locale: &Locale) -> Result<String, LocaleError> {
         // Load primary locale messages
         let messages = self.load_locale(locale).await?;
-        
+
         // Try to get message from primary locale
         if let Some(message) = messages.get(key) {
             return Ok(message.clone());
@@ -177,10 +176,10 @@ impl MessageLoader {
     // Preload all supported locales
     pub async fn preload_all(&self) -> Result<(), LocaleError> {
         let supported_locales = self.registry.get_supported_locales();
-        
+
         for locale in supported_locales {
             if let Err(e) = self.load_locale(locale).await {
-                eprintln!("Warning: Failed to preload locale {}: {}", locale, e);
+                warn!("Failed to preload locale {}: {}", locale, e);
             }
         }
 
@@ -199,7 +198,7 @@ impl MessageLoader {
             let mut cache = self.cache.write().await;
             cache.remove(locale);
         }
-        
+
         self.load_locale(locale).await?;
         Ok(())
     }
@@ -212,15 +211,15 @@ impl MessageLoader {
             return Ok(available_locales);
         }
 
-        let mut entries = tokio::fs::read_dir(&self.base_path)
-            .await
-            .map_err(|e| LocaleError::FileError(format!(
-                "Failed to read locale directory: {}", e
-            )))?;
+        let mut entries = tokio::fs::read_dir(&self.base_path).await.map_err(|e| {
+            LocaleError::FileError(format!("Failed to read locale directory: {}", e))
+        })?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            LocaleError::FileError(format!("Failed to read directory entry: {}", e))
-        })? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| LocaleError::FileError(format!("Failed to read directory entry: {}", e)))?
+        {
             let path = entry.path();
             if path.is_file() {
                 if let Some(extension) = path.extension() {
@@ -244,12 +243,12 @@ impl MessageLoader {
 // Simple message interpolation
 fn interpolate_message(template: &str, params: &HashMap<String, String>) -> String {
     let mut result = template.to_string();
-    
+
     for (key, value) in params {
         let placeholder = format!("{{{}}}", key);
         result = result.replace(&placeholder, value);
     }
-    
+
     result
 }
 
@@ -266,16 +265,17 @@ pub async fn t_with_params(
     locale: &Locale,
     params: HashMap<String, String>,
 ) -> String {
-    loader.get_message_with_params(key, locale, &params).await.unwrap_or_else(|_| {
-        format!("[{}]", key)
-    })
+    loader
+        .get_message_with_params(key, locale, &params)
+        .await
+        .unwrap_or_else(|_| format!("[{}]", key))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::fs;
+    use tempfile::TempDir;
 
     async fn create_test_locale_files(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         // English messages
@@ -284,7 +284,9 @@ mod tests {
                 ("hello".to_string(), "Hello".to_string()),
                 ("goodbye".to_string(), "Goodbye".to_string()),
                 ("welcome".to_string(), "Welcome, {name}!".to_string()),
-            ].into_iter().collect(),
+            ]
+            .into_iter()
+            .collect(),
             metadata: Some(MessageMetadata {
                 locale: "en".to_string(),
                 version: "1.0".to_string(),
@@ -298,7 +300,9 @@ mod tests {
             messages: [
                 ("hello".to_string(), "Xin chào".to_string()),
                 ("welcome".to_string(), "Chào mừng, {name}!".to_string()),
-            ].into_iter().collect(),
+            ]
+            .into_iter()
+            .collect(),
             metadata: Some(MessageMetadata {
                 locale: "vi".to_string(),
                 version: "1.0".to_string(),
@@ -366,10 +370,14 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("name".to_string(), "John".to_string());
 
-        let welcome_en = loader.get_message_with_params("welcome", &Locale::En, &params).await?;
+        let welcome_en = loader
+            .get_message_with_params("welcome", &Locale::En, &params)
+            .await?;
         assert_eq!(welcome_en, "Welcome, John!");
 
-        let welcome_vi = loader.get_message_with_params("welcome", &Locale::Vi, &params).await?;
+        let welcome_vi = loader
+            .get_message_with_params("welcome", &Locale::Vi, &params)
+            .await?;
         assert_eq!(welcome_vi, "Chào mừng, John!");
 
         Ok(())
@@ -403,7 +411,7 @@ mod tests {
     #[tokio::test]
     async fn test_real_locale_files() -> Result<(), Box<dyn std::error::Error>> {
         let locales_path = std::path::Path::new("locales");
-        
+
         if !locales_path.exists() {
             // Skip test if locales directory doesn't exist
             return Ok(());
@@ -415,31 +423,34 @@ mod tests {
         if let Ok(en_messages) = loader.load_locale(&Locale::En).await {
             assert!(en_messages.get("hello").is_some());
             assert_eq!(en_messages.get("hello").unwrap(), "Hello");
-            println!("✅ English messages loaded successfully");
+            tracing::info!("✅ English messages loaded successfully");
         }
 
         // Test loading Vietnamese messages
         if let Ok(vi_messages) = loader.load_locale(&Locale::Vi).await {
             assert!(vi_messages.get("hello").is_some());
             assert_eq!(vi_messages.get("hello").unwrap(), "Xin chào");
-            println!("✅ Vietnamese messages loaded successfully");
+            tracing::info!("✅ Vietnamese messages loaded successfully");
         }
 
         // Test message with parameters
         let mut params = HashMap::new();
         params.insert("name".to_string(), "Sếp".to_string());
-        
-        if let Ok(welcome_vi) = loader.get_message_with_params("welcome", &Locale::Vi, &params).await {
+
+        if let Ok(welcome_vi) = loader
+            .get_message_with_params("welcome", &Locale::Vi, &params)
+            .await
+        {
             assert_eq!(welcome_vi, "Chào mừng, Sếp!");
-            println!("✅ Vietnamese parameterized message: {}", welcome_vi);
+            tracing::info!("✅ Vietnamese parameterized message: {}", welcome_vi);
         }
 
         // Test fallback (message that doesn't exist in Vietnamese)
         if let Ok(goodbye_vi) = loader.get_message("goodbye", &Locale::Vi).await {
             // Should fallback to English if Vietnamese doesn't have this message
-            println!("✅ Fallback message: {}", goodbye_vi);
+            tracing::info!("✅ Fallback message: {}", goodbye_vi);
         }
 
         Ok(())
     }
-} 
+}

@@ -1,0 +1,23 @@
+{
+  "environment": "staging",
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "workers": 8
+  },
+  "log": {
+    "level": "debug",
+    "file_path": "/var/log/rust-api.log"
+  },
+  "databases": [
+    {
+      "host": "staging-db.example.com",
+      "port": 27017,
+      "database": "rust_api_staging",
+      "username": "staging_user",
+      "password": "staging_password",
+      "connection_timeout": 30,
+      "max_connections": 50
+    }
+  ]
+} 

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // User registration request
@@ -85,20 +85,26 @@ impl UserRole {
 // JWT Claims structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,        // Subject (user ID)
-    pub username: String,   // Username
-    pub role: String,       // User role
+    pub sub: String,            // Subject (user ID)
+    pub username: String,       // Username
+    pub role: String,           // User role
     pub locale: Option<String>, // User preferred locale
-    pub exp: usize,         // Expiration time (timestamp)
-    pub iat: usize,         // Issued at (timestamp)
-    pub iss: String,        // Issuer
+    pub exp: usize,             // Expiration time (timestamp)
+    pub iat: usize,             // Issued at (timestamp)
+    pub iss: String,            // Issuer
 }
 
 impl Claims {
-    pub fn new(user_id: Uuid, username: String, role: UserRole, locale: Option<String>, expires_in_hours: i64) -> Self {
+    pub fn new(
+        user_id: Uuid,
+        username: String,
+        role: UserRole,
+        locale: Option<String>,
+        expires_in_hours: i64,
+    ) -> Self {
         let now = Utc::now();
         let exp = (now + chrono::Duration::hours(expires_in_hours)).timestamp() as usize;
-        
+
         Self {
             sub: user_id.to_string(),
             username,
@@ -208,7 +214,7 @@ mod tests {
             "testuser".to_string(),
             UserRole::User,
             Some("en".to_string()),
-            24
+            24,
         );
 
         assert_eq!(claims.sub, user_id.to_string());
@@ -229,4 +235,4 @@ mod tests {
         assert_eq!(UserRole::from_string("guest").unwrap(), UserRole::Guest);
         assert!(UserRole::from_string("invalid").is_err());
     }
-} 
+}

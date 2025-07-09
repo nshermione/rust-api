@@ -1,3 +1,2 @@
 /target
-/configs/.env
-/configs/.env.production
+/configs/config.production.json

@@ -1,0 +1,347 @@
+
+---
+alwaysApply: false
+description: "Internationalization (i18n) and locale system rules for multi-language support, locale detection, and message loading"
+globs: ["src/system/locale/**", "**/locale.rs", "**/i18n.rs", "locales/**"]
+---
+
+# Locale/i18n System Rules
+
+## Multi-Language Support Architecture
+
+### Supported Languages
+- **English (en)**: Default language, always available
+- **Vietnamese (vi)**: Primary local language
+- **Japanese (ja)**: Asian market support
+- **Korean (ko)**: Asian market support  
+- **Chinese (zh)**: Asian market support
+
+### Locale Detection Priority
+1. **Query parameters**: `?lang=vi` or `?locale=vi`
+2. **Accept-Language header**: `Accept-Language: vi` or `Accept-Locale: vi`
+3. **JWT token claims**: Mock implementation for user preferences
+4. **Default fallback**: English (en)
+
+### Fallback Chain Strategy
+- **Vietnamese → English**: `vi` falls back to `en`
+- **Asian languages → English**: `ja`, `ko`, `zh` fall back to `en`
+- **English**: No fallback needed (base language)
+
+## Locale System Structure
+
+### Core Locale Types
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Locale {
+    En,  // English
+    Vi,  // Vietnamese
+    Ja,  // Japanese
+    Ko,  // Korean
+    Zh,  // Chinese
+}
+
+#[derive(Debug, Clone)]
+pub enum LocaleSource {
+    Query,      // From query parameters
+    Header,     // From Accept-Language header
+    Token,      // From JWT token claims
+    Default,    // Default fallback
+}
+
+#[derive(Debug, Clone)]
+pub struct LocaleInfo {
+    pub locale: Locale,
+    pub source: LocaleSource,
+    pub fallback: Option<Locale>,
+}
+```
+
+### Message Loading System
+```rust
+#[derive(Debug, Clone)]
+pub struct MessageLoader {
+    base_path: PathBuf,
+    cache: Arc<RwLock<HashMap<Locale, Messages>>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Messages {
+    pub messages: HashMap<String, String>,
+    pub metadata: MessageMetadata,
+}
+```
+
+## Locale Detection Implementation
+
+### Request Locale Extraction
+```rust
+pub async fn extract_locale_info(
+    headers: &HeaderMap,
+    query: &Query<LocaleQuery>
+) -> Result<LocaleInfo, LocaleError> {
+    // 1. Check query parameters first
+    if let Some(locale) = query.lang.as_ref().or(query.locale.as_ref()) {
+        if let Ok(parsed_locale) = Locale::from_str(locale) {
+            return Ok(LocaleInfo {
+                locale: parsed_locale.clone(),
+                source: LocaleSource::Query,
+                fallback: get_fallback_locale(&parsed_locale),
+            });
+        }
+    }
+    
+    // 2. Check Accept-Language header
+    if let Some(accept_lang) = headers.get("accept-language") {
+        if let Ok(locale) = parse_accept_language(accept_lang.to_str()?) {
+            return Ok(LocaleInfo {
+                locale,
+                source: LocaleSource::Header,
+                fallback: get_fallback_locale(&locale),
+            });
+        }
+    }
+    
+    // 3. Default fallback
+    Ok(LocaleInfo {
+        locale: Locale::En,
+        source: LocaleSource::Default,
+        fallback: None,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LocaleQuery {
+    pub lang: Option<String>,
+    pub locale: Option<String>,
+}
+```
+
+## Message Loading and Caching
+
+### Message File Structure
+```json
+{
+  "messages": {
+    "hello": "Hello",
+    "welcome": "Welcome, {name}!",
+    "api.status.healthy": "System is healthy",
+    "auth.login.success": "Login successful",
+    "validation.required": "This field is required"
+  },
+  "metadata": {
+    "locale": "en",
+    "version": "1.0.0",
+    "last_updated": "2024-01-01T00:00:00Z"
+  }
+}
+```
+
+### Message Loader Implementation
+```rust
+impl MessageLoader {
+    pub fn new<P: AsRef<Path>>(base_path: P) -> Self {
+        Self {
+            base_path: base_path.as_ref().to_path_buf(),
+            cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+    
+    pub async fn get_message(
+        &self,
+        key: &str,
+        locale: &Locale
+    ) -> Result<String, LocaleError> {
+        // Try cache first
+        if let Some(message) = self.get_from_cache(key, locale).await {
+            return Ok(message);
+        }
+        
+        // Load messages if not cached
+        self.load_messages(locale).await?;
+        
+        // Try cache again, or fallback
+        self.get_from_cache(key, locale).await
+            .or_else(|| self.get_from_fallback(key, locale))
+            .ok_or_else(|| LocaleError::MessageNotFound { 
+                key: key.to_string(), 
+                locale: locale.clone() 
+            })
+    }
+    
+    pub async fn get_message_with_params(
+        &self,
+        key: &str,
+        locale: &Locale,
+        params: &HashMap<String, String>
+    ) -> Result<String, LocaleError> {
+        let template = self.get_message(key, locale).await?;
+        Ok(interpolate_message(&template, params))
+    }
+}
+```
+
+### Message Interpolation
+```rust
+fn interpolate_message(template: &str, params: &HashMap<String, String>) -> String {
+    let mut result = template.to_string();
+    for (key, value) in params {
+        let placeholder = format!("{{{}}}", key);
+        result = result.replace(&placeholder, value);
+    }
+    result
+}
+```
+
+## Locale Utilities
+
+```rust
+impl Locale {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Locale::En => "en",
+            Locale::Vi => "vi", 
+            Locale::Ja => "ja",
+            Locale::Ko => "ko",
+            Locale::Zh => "zh",
+        }
+    }
+    
+    pub fn from_str(s: &str) -> Result<Self, LocaleError> {
+        match s.to_lowercase().as_str() {
+            "en" | "eng" | "english" => Ok(Locale::En),
+            "vi" | "vie" | "vietnamese" => Ok(Locale::Vi),
+            "ja" | "jp" | "japanese" => Ok(Locale::Ja),
+            "ko" | "kr" | "korean" => Ok(Locale::Ko),
+            "zh" | "cn" | "chinese" => Ok(Locale::Zh),
+            _ => Err(LocaleError::UnsupportedLocale { 
+                locale: s.to_string() 
+            }),
+        }
+    }
+}
+
+fn get_fallback_locale(locale: &Locale) -> Option<Locale> {
+    match locale {
+        Locale::En => None,
+        Locale::Vi | Locale::Ja | Locale::Ko | Locale::Zh => Some(Locale::En),
+    }
+}
+```
+
+## Error Handling
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum LocaleError {
+    #[error("Unsupported locale: {locale}")]
+    UnsupportedLocale { locale: String },
+    
+    #[error("Message not found: {key} for locale {locale:?}")]
+    MessageNotFound { key: String, locale: Locale },
+    
+    #[error("Failed to read locale file {path:?}: {source}")]
+    FileReadError { path: PathBuf, source: std::io::Error },
+    
+    #[error("Failed to parse locale file {path:?}: {source}")]
+    ParseError { path: PathBuf, source: serde_json::Error },
+}
+```
+
+## Axum Integration
+
+### Locale Middleware
+```rust
+pub async fn locale_middleware<B>(
+    mut request: Request<B>,
+    next: Next<B>
+) -> Result<Response, StatusCode> {
+    let (parts, body) = request.into_parts();
+    
+    let query = Query::<LocaleQuery>::try_from_uri(&parts.uri)
+        .unwrap_or_default();
+    
+    let locale_info = extract_locale_info(&parts.headers, &query)
+        .await
+        .unwrap_or_else(|_| LocaleInfo {
+            locale: Locale::En,
+            source: LocaleSource::Default,
+            fallback: None,
+        });
+    
+    request = Request::from_parts(parts, body);
+    request.extensions_mut().insert(locale_info);
+    
+    Ok(next.run(request).await)
+}
+```
+
+### Handler Usage
+```rust
+pub async fn localized_handler(
+    Extension(locale_info): Extension<LocaleInfo>,
+    State(state): State<AppState>
+) -> Result<Json<LocalizedResponse>, AppError> {
+    let welcome_message = state.message_loader
+        .get_message("welcome", &locale_info.locale)
+        .await?;
+    
+    Ok(Json(LocalizedResponse {
+        message: welcome_message,
+        locale: locale_info.locale,
+    }))
+}
+```
+
+## API Endpoints
+
+```rust
+// GET /locale/test - Test locale detection
+pub async fn locale_test_handler(
+    Extension(locale_info): Extension<LocaleInfo>
+) -> Json<LocaleTestResponse> {
+    Json(LocaleTestResponse {
+        detected_locale: locale_info.locale,
+        source: locale_info.source,
+        fallback: locale_info.fallback,
+    })
+}
+
+// GET /locale/translate?key=hello - Show translations
+pub async fn translate_handler(
+    Extension(locale_info): Extension<LocaleInfo>,
+    Query(query): Query<TranslateQuery>,
+    State(state): State<AppState>
+) -> Result<Json<TranslationResponse>, AppError> {
+    let message = state.message_loader
+        .get_message(&query.key, &locale_info.locale)
+        .await?;
+    
+    Ok(Json(TranslationResponse {
+        key: query.key,
+        message,
+        locale: locale_info.locale,
+    }))
+}
+```
+
+## Best Practices
+
+### Message Organization
+- **Hierarchical keys**: Use dot notation (`auth.login.success`)
+- **Consistent naming**: Follow same patterns across languages
+- **Parameter placeholders**: Use `{param}` format for variables
+- **Default values**: Always provide English translations
+
+### Performance
+- **Caching**: Cache loaded messages in memory
+- **Lazy loading**: Load messages only when needed
+- **Fallback strategy**: Always have English as fallback
+
+### Translation Management
+- **Version control**: Track translation file versions
+- **Update timestamps**: Track when translations were last updated
+- **Validation**: Ensure all keys exist in all supported languages
+
+### Error Handling
+  - **Graceful fallbacks**: Always show something, even if not perfectly localized
+  - **Logging**: Log missing translations for future updates

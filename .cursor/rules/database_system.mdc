@@ -1,0 +1,203 @@
+
+---
+alwaysApply: false
+description: "MongoDB database system rules for multi-database connections, health monitoring, and connection pooling"
+globs: ["src/system/database/**", "**/database.rs", "**/db.rs", "**/mongo.rs"]
+---
+
+# Database System Rules
+
+## MongoDB Multi-Database Architecture
+
+### Database Manager Features
+- **Multi-database support**: Primary + secondary databases
+- **Connection pooling**: Configurable min/max connections per database
+- **Health monitoring**: Automatic ping tests and connection status
+- **Graceful shutdown**: Cleanup all connections on application exit
+- **Error handling**: Comprehensive error contexts and recovery
+
+### Database Configuration Structure
+```rust
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabaseConfig {
+    pub name: String,           // Database identifier (default, analytics, logs)
+    pub host: String,
+    pub port: u16,
+    pub database: String,       // Actual database name in MongoDB
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub connection_timeout: u64,
+    pub max_connections: u32,
+}
+```
+
+## Database Manager Implementation
+
+### Core Database Service
+```rust
+#[derive(Debug, Clone)]
+pub struct DatabaseService {
+    connections: Arc<RwLock<HashMap<String, mongodb::Client>>>,
+}
+
+impl DatabaseService {
+    pub async fn initialize(config: &AppConfig) -> Result<DatabaseManager, DatabaseError> {
+        let mut manager = DatabaseManager::new();
+        
+        for db_config in &config.databases {
+            let client = Self::create_client(db_config).await?;
+            manager.add_connection(db_config.name.clone(), client);
+        }
+        
+        manager.health_check_all().await?;
+        Ok(manager)
+    }
+    
+    async fn create_client(config: &DatabaseConfig) -> Result<mongodb::Client, DatabaseError> {
+        let mut client_options = ClientOptions::parse(&config.connection_string()).await?;
+        client_options.max_pool_size = Some(config.max_connections);
+        client_options.connect_timeout = Some(Duration::from_secs(config.connection_timeout));
+        
+        Client::with_options(client_options)
+            .map_err(DatabaseError::ConnectionFailed)
+    }
+}
+```
+
+### Database Helper Functions
+```rust
+pub async fn get_database(
+    manager: &DatabaseManager, 
+    name: Option<&str>
+) -> Result<mongodb::Database, DatabaseError> {
+    manager.get_database(name).await
+}
+
+pub async fn health_check(manager: &DatabaseManager) -> Result<HealthStatus, DatabaseError> {
+    let results = manager.health_check_all().await?;
+    
+    Ok(HealthStatus {
+        overall_healthy: results.values().all(|&is_healthy| is_healthy),
+        databases: results,
+        timestamp: chrono::Utc::now(),
+    })
+}
+```
+
+## Database Error Handling
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum DatabaseError {
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(#[from] mongodb::error::Error),
+    
+    #[error("Database not found: {name}")]
+    DatabaseNotFound { name: String },
+    
+    #[error("Health check failed for {database}: {reason}")]
+    HealthCheckFailed { database: String, reason: String },
+    
+    #[error("Configuration error: {message}")]
+    ConfigurationError { message: String },
+}
+```
+
+## Collection Operations
+
+### Generic Collection Helper
+```rust
+pub async fn get_collection<T>(
+    manager: &DatabaseManager,
+    database_name: Option<&str>,
+    collection_name: &str
+) -> Result<mongodb::Collection<T>, DatabaseError> 
+where
+    T: DeserializeOwned + Serialize + Unpin + Send + Sync,
+{
+    let db = manager.get_database(database_name).await?;
+    Ok(db.collection::<T>(collection_name))
+}
+
+// Typed collection helpers
+pub async fn get_users_collection(
+    manager: &DatabaseManager
+) -> Result<mongodb::Collection<User>, DatabaseError> {
+    get_collection(manager, Some("default"), "users").await
+}
+```
+
+### CRUD Operations Pattern
+```rust
+pub async fn insert_document<T>(
+    collection: &mongodb::Collection<T>,
+    document: &T
+) -> Result<mongodb::results::InsertOneResult, DatabaseError>
+where
+    T: Serialize + Send + Sync,
+{
+    collection.insert_one(document, None)
+        .await
+        .map_err(DatabaseError::ConnectionFailed)
+}
+```
+
+## Axum Integration
+
+### State Integration
+```rust
+#[derive(Clone)]
+pub struct AppState {
+    pub config: Arc<AppConfig>,
+    pub database: DatabaseManager,
+}
+
+// Usage in handlers
+pub async fn create_user_handler(
+    State(state): State<AppState>,
+    Json(user_data): Json<CreateUserRequest>
+) -> Result<Json<User>, AppError> {
+    let users_collection = get_users_collection(&state.database).await?;
+    let user = User::new(user_data);
+    insert_document(&users_collection, &user).await?;
+    Ok(Json(user))
+}
+```
+
+### Health Check Endpoints
+```rust
+pub async fn database_health_handler(
+    State(state): State<AppState>
+) -> Result<Json<HealthStatus>, AppError> {
+    let health_status = health_check(&state.database).await?;
+    Ok(Json(health_status))
+}
+```
+
+## Best Practices
+
+### Connection Management
+- **Initialize once**: Create database manager at application startup
+- **Share safely**: Use `Arc<DatabaseManager>` for sharing across async tasks
+- **Connection pooling**: Configure appropriate min/max connections per database
+- **Timeout handling**: Set reasonable connection and operation timeouts
+
+### Error Handling
+- **Context-aware errors**: Provide database name and operation context
+- **Graceful degradation**: Handle database unavailability gracefully
+- **Monitoring**: Log connection status and performance metrics
+
+### Security
+- **Authentication**: Use strong credentials and connection encryption
+- **Connection strings**: Store sensitive connection data in environment variables
+- **Validation**: Validate all database inputs to prevent injection
+
+### Performance
+- **Connection pooling**: Reuse connections instead of creating new ones
+- **Indexing**: Create appropriate indexes for query performance
+- **Query optimization**: Use projection to limit returned fields
+
+- **Mock databases**: Use test databases or in-memory alternatives
+- **Integration tests**: Test actual database operations
+- **Health monitoring**: Test connection health and recovery
+- **Load testing**: Validate performance under concurrent load

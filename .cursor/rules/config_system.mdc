@@ -1,0 +1,149 @@
+
+---
+alwaysApply: false
+description: "Configuration system rules for multi-environment setup, JSON config files, and environment variable handling"
+globs: ["src/system/config/**", "configs/**", "*.config.*", "**/config.rs"]
+---
+
+# Configuration System Rules
+
+## Environment Configuration Strategy
+
+### Priority Order
+1. **config.default.json** → Base configuration
+2. **config.{environment}.json** → Environment-specific overrides  
+3. **Environment variables** → Runtime overrides
+
+### File Location
+- **Location**: `configs/` folder (separated from project root)
+- **Format**: JSON with comments support via `serde_json5`
+- **Structure**: Hierarchical configuration with logical grouping
+
+## Configuration Structure
+
+```rust
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppConfig {
+    pub server: ServerConfig,
+    pub log: LogConfig,
+    pub databases: Vec<DatabaseConfig>,
+    pub environment: String,
+}
+```
+
+## Multi-Database Configuration
+
+### Naming Convention
+- **Primary**: `DB_HOST`, `DB_PORT`, `DB_NAME`
+- **Secondary**: `DB1_HOST`, `DB1_PORT`, `DB1_NAME` 
+- **Additional**: `DB2_HOST`, `DB2_PORT`, `DB2_NAME`
+
+### Database Config Structure
+```rust
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabaseConfig {
+    pub name: String,           // Database identifier
+    pub host: String,
+    pub port: u16,
+    pub database: String,       // Database name
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub connection_timeout: u64,
+    pub max_connections: u32,
+}
+```
+
+## Configuration Loading Pattern
+
+```rust
+impl AppConfig {
+    pub fn load() -> Result<Self, ConfigError> {
+        // 1. Load default config
+        let mut config = Self::load_from_file("configs/config.default.json")?;
+        
+        // 2. Load environment-specific config and merge
+        let env = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "default".to_string());
+        if let Ok(env_config) = Self::load_from_file(&format!("configs/config.{}.json", env)) {
+            config = config.merge(env_config)?;
+        }
+        
+        // 3. Apply environment variable overrides
+        config.apply_env_overrides()?;
+        
+        Ok(config)
+    }
+}
+```
+
+## Configuration Usage
+
+### Axum Integration
+```rust
+// Load and share config across the application
+let config = Arc::new(AppConfig::load()?);
+
+let app = Router::new()
+    .route("/health", {
+        let config = config.clone();
+        get(move || health_check(config))
+    });
+```
+
+## Configuration File Examples
+
+### configs/config.default.json
+```json
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 3000
+  },
+  "log": {
+    "level": "info",
+    "format": "json"
+  },
+  "databases": [
+    {
+      "name": "default",
+      "host": "localhost",
+      "port": 27017,
+      "database": "rust_api_dev",
+      "max_connections": 10
+    }
+  ],
+  "environment": "default"
+}
+```
+
+## Error Handling
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("Configuration file not found: {path}")]
+    FileNotFound { path: String },
+    
+    #[error("Invalid configuration format: {source}")]
+    InvalidFormat { source: serde_json::Error },
+    
+    #[error("Missing required configuration: {field}")]
+    MissingRequired { field: String },
+}
+```
+
+## Best Practices
+
+### Security
+- **Never commit sensitive data** to config files
+- Use environment variables for passwords, API keys, tokens
+- Validate all configuration values on startup
+
+### Performance
+- Load configuration once at startup
+- Use `Arc<AppConfig>` for sharing across async tasks
+- Use default values to reduce configuration complexity
+
+### Maintenance
+  - Use meaningful configuration names
+  - Group related configurations together
+  - Provide sensible defaults for development
