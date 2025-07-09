@@ -1,0 +1,39 @@
+{
+  "messages": {
+    "hello": "Xin chào",
+    "goodbye": "Tạm biệt",
+    "welcome": "Chào mừng, {name}!",
+    "welcome_back": "Chào mừng {name} trở lại!",
+    "api.status.healthy": "Hệ thống hoạt động tốt",
+    "api.status.unhealthy": "Hệ thống đang gặp sự cố",
+    "api.error.not_found": "Không tìm thấy tài nguyên",
+    "api.error.unauthorized": "Truy cập không được phép",
+    "api.error.forbidden": "Truy cập bị cấm",
+    "api.error.internal": "Lỗi máy chủ nội bộ",
+    "api.error.validation": "Xác thực thất bại: {details}",
+    "api.success.created": "Tạo tài nguyên thành công",
+    "api.success.updated": "Cập nhật tài nguyên thành công",
+    "api.success.deleted": "Xóa tài nguyên thành công",
+    "db.connection.success": "Kết nối cơ sở dữ liệu thành công",
+    "db.connection.failed": "Không thể kết nối cơ sở dữ liệu",
+    "db.health.check": "Kiểm tra tình trạng cơ sở dữ liệu",
+    "version.current": "Phiên bản API hiện tại: {version}",
+    "version.supported": "Các phiên bản được hỗ trợ",
+    "version.deprecated": "Phiên bản này đã lỗi thời",
+    "auth.login.success": "Đăng nhập thành công",
+    "auth.login.failed": "Thông tin đăng nhập không hợp lệ",
+    "auth.logout.success": "Đăng xuất thành công",
+    "auth.token.expired": "Token xác thực đã hết hạn",
+    "auth.token.invalid": "Token xác thực không hợp lệ",
+    "user.profile.updated": "Cập nhật hồ sơ thành công",
+    "user.not_found": "Không tìm thấy người dùng",
+    "config.environment": "Môi trường: {env}",
+    "config.loaded": "Tải cấu hình thành công"
+  },
+  "metadata": {
+    "locale": "vi",
+    "version": "1.0.0",
+    "last_updated": "2024-01-01T00:00:00Z",
+    "translators": ["Vietnamese Translator"]
+  }
+} 

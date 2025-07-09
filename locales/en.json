@@ -1,0 +1,39 @@
+{
+  "messages": {
+    "hello": "Hello",
+    "goodbye": "Goodbye",
+    "welcome": "Welcome, {name}!",
+    "welcome_back": "Welcome back, {name}!",
+    "api.status.healthy": "System is healthy",
+    "api.status.unhealthy": "System is experiencing issues",
+    "api.error.not_found": "Resource not found",
+    "api.error.unauthorized": "Unauthorized access",
+    "api.error.forbidden": "Access forbidden",
+    "api.error.internal": "Internal server error",
+    "api.error.validation": "Validation failed: {details}",
+    "api.success.created": "Resource created successfully",
+    "api.success.updated": "Resource updated successfully",
+    "api.success.deleted": "Resource deleted successfully",
+    "db.connection.success": "Database connected successfully",
+    "db.connection.failed": "Failed to connect to database",
+    "db.health.check": "Database health check",
+    "version.current": "Current API version: {version}",
+    "version.supported": "Supported versions",
+    "version.deprecated": "This version is deprecated",
+    "auth.login.success": "Login successful",
+    "auth.login.failed": "Invalid credentials",
+    "auth.logout.success": "Logout successful",
+    "auth.token.expired": "Authentication token has expired",
+    "auth.token.invalid": "Invalid authentication token",
+    "user.profile.updated": "Profile updated successfully",
+    "user.not_found": "User not found",
+    "config.environment": "Environment: {env}",
+    "config.loaded": "Configuration loaded successfully"
+  },
+  "metadata": {
+    "locale": "en",
+    "version": "1.0.0",
+    "last_updated": "2024-01-01T00:00:00Z",
+    "translators": ["Native Speaker"]
+  }
+} 

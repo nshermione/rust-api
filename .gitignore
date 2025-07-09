@@ -1,0 +1,3 @@
+/target
+/configs/.env
+/configs/.env.production
