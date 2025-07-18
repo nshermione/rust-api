@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use crate::shared::utils::date_util::{DateTime, DateUtil};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -36,8 +36,8 @@ pub struct UserDto {
     pub full_name: Option<String>,
     pub role: UserRole,
     pub is_active: bool,
-    pub created_at: DateTime<Utc>,
-    pub last_login: Option<DateTime<Utc>>,
+    pub created_at: DateTime,
+    pub last_login: Option<DateTime>,
 }
 
 // User role enum
@@ -102,8 +102,8 @@ impl Claims {
         locale: Option<String>,
         expires_in_hours: i64,
     ) -> Self {
-        let now = Utc::now();
-        let exp = (now + chrono::Duration::hours(expires_in_hours)).timestamp() as usize;
+        let now = DateUtil::now();
+        let exp = DateUtil::to_timestamp(&DateUtil::add_duration(&now, DateUtil::hours(expires_in_hours)).unwrap()) as usize;
 
         Self {
             sub: user_id.to_string(),
@@ -111,13 +111,13 @@ impl Claims {
             role: role.to_string(),
             locale,
             exp,
-            iat: now.timestamp() as usize,
+            iat: DateUtil::to_timestamp(&now) as usize,
             iss: "rust-api-service".to_string(),
         }
     }
 
     pub fn is_expired(&self) -> bool {
-        let now = Utc::now().timestamp() as usize;
+        let now = DateUtil::to_timestamp(&DateUtil::now()) as usize;
         now >= self.exp
     }
 
@@ -151,7 +151,7 @@ pub struct TokenValidationResponse {
     pub user_id: Option<String>,
     pub username: Option<String>,
     pub role: Option<String>,
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime>,
 }
 
 // Error responses

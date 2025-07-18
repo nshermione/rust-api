@@ -1,6 +1,6 @@
 use jsonwebtoken::{encode, decode, Header, Algorithm, Validation, EncodingKey, DecodingKey};
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc, Duration};
+use crate::shared::utils::date_util::{DateTime, DateUtil, Duration};
 use uuid::Uuid;
 use std::collections::HashSet;
 
@@ -66,17 +66,18 @@ impl JwtService {
     }
 
     // Generate access token for user
-    pub fn generate_token(&self, user: &User) -> Result<(String, DateTime<Utc>), JwtError> {
-        let expires_at = Utc::now() + Duration::hours(self.config.token_expiry_hours);
+    pub fn generate_token(&self, user: &User) -> Result<(String, DateTime), JwtError> {
+        let expires_at = DateUtil::add_duration(&DateUtil::now(), DateUtil::hours(self.config.token_expiry_hours))
+            .map_err(|e| JwtError::TokenCreation(e.to_string()))?;
         
-        let now = Utc::now();
+        let now = DateUtil::now();
         let claims = crate::domains::user::dto::Claims {
             sub: user.user_id.clone(),
             username: user.username.clone(),
             role: user.role.to_string(),
             locale: user.preferred_locale.clone(),
-            exp: (now + Duration::hours(self.config.token_expiry_hours)).timestamp() as usize,
-            iat: now.timestamp() as usize,
+            exp: DateUtil::to_timestamp(&DateUtil::add_duration(&now, DateUtil::hours(self.config.token_expiry_hours)).unwrap()) as usize,
+            iat: DateUtil::to_timestamp(&now) as usize,
             iss: self.config.issuer.clone(),
         };
 
@@ -87,14 +88,15 @@ impl JwtService {
     }
 
     // Generate refresh token (longer expiry, different claims)
-    pub fn generate_refresh_token(&self, user: &User) -> Result<(String, DateTime<Utc>), JwtError> {
-        let expires_at = Utc::now() + Duration::days(self.config.refresh_token_expiry_days);
+    pub fn generate_refresh_token(&self, user: &User) -> Result<(String, DateTime), JwtError> {
+        let expires_at = DateUtil::add_duration(&DateUtil::now(), DateUtil::days(self.config.refresh_token_expiry_days))
+            .map_err(|e| JwtError::TokenCreation(e.to_string()))?;
         
         let refresh_claims = RefreshTokenClaims {
             sub: user.user_id.clone(),
             jti: Uuid::new_v4().to_string(), // Unique JWT ID for tracking
-            exp: expires_at.timestamp() as usize,
-            iat: Utc::now().timestamp() as usize,
+            exp: DateUtil::to_timestamp(&expires_at) as usize,
+            iat: DateUtil::to_timestamp(&DateUtil::now()) as usize,
             iss: self.config.issuer.clone(),
             token_type: "refresh".to_string(),
         };
@@ -163,7 +165,7 @@ impl JwtService {
                 user_id: Some(claims.sub),
                 username: Some(claims.username),
                 role: Some(claims.role),
-                expires_at: Some(DateTime::from_timestamp(claims.exp as i64, 0).unwrap_or_default()),
+                expires_at: Some(DateUtil::from_timestamp(claims.exp as i64).unwrap_or_default()),
             },
             Err(_) => TokenValidationResponse {
                 valid: false,
@@ -204,7 +206,7 @@ pub struct RefreshTokenClaims {
 
 impl RefreshTokenClaims {
     pub fn is_expired(&self) -> bool {
-        let now = Utc::now().timestamp() as usize;
+        let now = DateUtil::to_timestamp(&DateUtil::now()) as usize;
         now >= self.exp
     }
 

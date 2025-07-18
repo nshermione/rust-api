@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
+use crate::shared::utils::date_util::{DateTime, DateUtil};
 use uuid::Uuid;
 use bson::oid::ObjectId;
 
@@ -19,16 +19,16 @@ pub struct User {
     pub is_active: bool,
     pub is_verified: bool,
     pub preferred_locale: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub last_login: Option<DateTime<Utc>>,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+    pub last_login: Option<DateTime>,
     pub failed_login_attempts: i32,
-    pub locked_until: Option<DateTime<Utc>>,
+    pub locked_until: Option<DateTime>,
 }
 
 impl User {
     pub fn new(username: String, email: String, password_hash: String, full_name: Option<String>) -> Self {
-        let now = Utc::now();
+        let now = DateUtil::now();
         
         Self {
             id: None,
@@ -54,24 +54,24 @@ impl User {
     }
 
     pub fn update_last_login(&mut self) {
-        self.last_login = Some(Utc::now());
-        self.updated_at = Utc::now();
+        self.last_login = Some(DateUtil::now());
+        self.updated_at = DateUtil::now();
         self.failed_login_attempts = 0; // Reset failed attempts on successful login
     }
 
     pub fn increment_failed_login(&mut self) {
         self.failed_login_attempts += 1;
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
         
         // Lock account after 5 failed attempts for 15 minutes
         if self.failed_login_attempts >= 5 {
-            self.locked_until = Some(Utc::now() + chrono::Duration::minutes(15));
+            self.locked_until = Some(DateUtil::add_duration(&DateUtil::now(), DateUtil::minutes(15)).unwrap());
         }
     }
 
     pub fn is_locked(&self) -> bool {
         if let Some(locked_until) = self.locked_until {
-            Utc::now() < locked_until
+            DateUtil::now() < locked_until
         } else {
             false
         }
@@ -80,12 +80,12 @@ impl User {
     pub fn unlock_account(&mut self) {
         self.failed_login_attempts = 0;
         self.locked_until = None;
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
     }
 
     pub fn change_password(&mut self, new_password_hash: String) {
         self.password_hash = new_password_hash;
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
     }
 
     pub fn update_profile(&mut self, full_name: Option<String>, email: Option<String>) {
@@ -95,32 +95,32 @@ impl User {
         if let Some(new_email) = email {
             self.email = new_email;
         }
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
     }
 
     pub fn set_verified(&mut self) {
         self.is_verified = true;
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
     }
 
     pub fn deactivate(&mut self) {
         self.is_active = false;
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
     }
 
     pub fn activate(&mut self) {
         self.is_active = true;
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
     }
 
     pub fn set_role(&mut self, role: UserRole) {
         self.role = role;
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
     }
 
     pub fn set_locale(&mut self, locale: String) {
         self.preferred_locale = Some(locale);
-        self.updated_at = Utc::now();
+        self.updated_at = DateUtil::now();
     }
 }
 

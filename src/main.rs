@@ -136,7 +136,7 @@ async fn health_handler(
     info!("Health check requested");
     axum::response::Json(serde_json::json!({
         "status": "healthy",
-        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "timestamp": crate::shared::utils::date_util::DateUtil::to_rfc3339(&crate::shared::utils::date_util::DateUtil::now()),
         "environment": state.shared_state.config.environment,
         "api_version": API_VERSION
     }))

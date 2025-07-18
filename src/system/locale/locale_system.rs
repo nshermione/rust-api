@@ -133,7 +133,7 @@ impl IntoResponse for LocaleError {
         let body = Json(serde_json::json!({
             "error": "LOCALE_ERROR",
             "message": error_message,
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "timestamp": crate::shared::utils::date_util::DateUtil::to_rfc3339(&crate::shared::utils::date_util::DateUtil::now())
         }));
 
         (status, body).into_response()

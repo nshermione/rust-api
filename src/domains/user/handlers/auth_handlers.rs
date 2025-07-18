@@ -419,7 +419,7 @@ pub async fn auth_health() -> JsonResponse<serde_json::Value> {
     JsonResponse(json!({
         "status": "healthy",
         "service": "auth",
-        "timestamp": chrono::Utc::now().to_rfc3339()
+        "timestamp": crate::shared::utils::date_util::DateUtil::to_rfc3339(&crate::shared::utils::date_util::DateUtil::now())
     }))
 }
 
